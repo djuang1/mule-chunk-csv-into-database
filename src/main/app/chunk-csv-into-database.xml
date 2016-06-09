@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:vm="http://www.mulesoft.org/schema/mule/vm" xmlns:metadata="http://www.mulesoft.org/schema/mule/metadata" xmlns:file="http://www.mulesoft.org/schema/mule/file" xmlns:db="http://www.mulesoft.org/schema/mule/db" xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw" xmlns:batch="http://www.mulesoft.org/schema/mule/batch" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:spring="http://www.springframework.org/schema/beans" xmlns:core="http://www.mulesoft.org/schema/mule/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/vm http://www.mulesoft.org/schema/mule/vm/current/mule-vm.xsd
+http://www.mulesoft.org/schema/mule/file http://www.mulesoft.org/schema/mule/file/current/mule-file.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd">
+    <vm:connector name="ayncQueueConfig" validateConnections="true" doc:name="VM"/>
+    <db:mysql-config name="MySQL_Configuration" host="${db.host}" port="${db.port}" user="${db.user}" password="${db.password}" database="${db.db}" doc:name="MySQL Configuration"/>
+    <file:connector name="FileIn" writeToDirectory="${file.path.out}" autoDelete="true" streaming="true" validateConnections="true" doc:name="File"/>
+    <file:connector name="FileOut" writeToDirectory="${file.path.out}" autoDelete="true" streaming="true" validateConnections="true" doc:name="File"/>
+    <file:connector name="LogErrors" outputPattern="failedrows.txt" writeToDirectory="${file.path.out}" autoDelete="false" outputAppend="true" streaming="true" validateConnections="true" doc:name="File"/>
+    <flow name="largeTextFileFlow" initialState="started">
+        <file:inbound-endpoint path="${file.path.in}" moveToDirectory="${file.path.out}" connector-ref="FileIn" responseTimeout="10000" doc:name="Read CSV File" pollingFrequency="10000"/>
+        <set-variable variableName="lineGroupSize" value="500" doc:name="Set Line Group Size"/>
+        <custom-transformer class="com.mulesoft.services.file.FileRowGenerator" doc:name="FileRowGenerator"/>
+        <file:outbound-endpoint path="${file.path.out}" connector-ref="FileOut" responseTimeout="10000" doc:name="Move Processed File"/>
+        <catch-exception-strategy doc:name="Catch Exception Strategy">
+            <vm:outbound-endpoint exchange-pattern="one-way" path="errorReceive" connector-ref="ayncQueueConfig" doc:name="sendToErrorReceiver"/>
+        </catch-exception-strategy>
+    </flow>
+    <flow name="rowGroupProcessor">
+        <vm:inbound-endpoint exchange-pattern="one-way" path="asyncQueue" connector-ref="ayncQueueConfig" doc:name="asyncQueue"/>
+        <object-to-byte-array-transformer mimeType="text/csv" doc:name="Object to Byte Array"/>
+        <batch:execute name="rowGroupDisposal_Batch" doc:name="rowGroupDisposal_Batch"/>
+    </flow>
+    <batch:job name="rowGroupDisposal_Batch" max-failed-records="-1">
+        <batch:input>
+            <dw:transform-message metadata:id="6018c32a-a796-4c35-8be6-18d1695d9aa8" doc:name="Transform Message">
+                <dw:input-payload>
+                    <dw:reader-property name="ignoreEmptyLine" value="true"/>
+                    <dw:reader-property name="separator" value="|"/>
+                    <dw:reader-property name="header" value="false"/>
+                </dw:input-payload>
+                <dw:set-payload><![CDATA[%dw 1.0
+%output application/java
+---
+payload map {
+	pid: $.column_0,
+	last_name: $.column_1,
+	first_name: $.column_2,
+	dob: $.column_3,
+	gender: $.column_4,
+	race: $.column_5,
+	patient_id2: $.column_6,
+	date_admitted: $.column_7,
+	date_discharged: $.column_8,
+	reason_for_visit: $.column_9,
+	hospitalization_type_id: $.column_10,
+	patient_id: $.column_11,
+	icd9: $.column_12,
+	diagnosis_type_id: $.column_13
+}]]></dw:set-payload>
+            </dw:transform-message>
+        </batch:input>
+        <batch:process-records>
+            <batch:step name="doRealWork" accept-policy="ALL">
+                <batch:commit streaming="true" doc:name="Batch Commit">
+                    <db:insert config-ref="MySQL_Configuration" bulkMode="true" doc:name="Database">
+                        <db:parameterized-query><![CDATA[INSERT INTO csvmap1 (pid, last_name, first_name, dob, gender, race, patient_id, date_admitted, date_discharged, reason_for_visit, hospitalization_type_id, patient_id2, icd9, diagnosis_type_id) VALUES (#[payload.pid], #[payload.last_name], #[payload.first_name], #[payload.dob], #[payload.gender], #[payload.race], #[payload.patient_id], #[payload.date_admitted], #[payload.date_discharged], #[payload.reason_for_visit], #[payload.hospitalization_type_id], #[payload.patient_id2], #[payload.icd9], #[payload.diagnosis_type_id]);]]></db:parameterized-query>
+                    </db:insert>
+                </batch:commit>
+            </batch:step>
+            <batch:step name="acceptOnlyErrors" accept-policy="ONLY_FAILURES">
+                <vm:outbound-endpoint exchange-pattern="one-way" path="errorReceive" connector-ref="ayncQueueConfig" doc:name="sendToErrorReceive"/>
+            </batch:step>
+        </batch:process-records>
+        <batch:on-complete>
+            <logger message="Processed #[payload.totalRecords] records. Failed: #[payload.failedRecords]" level="INFO" doc:name="Logger"/>
+        </batch:on-complete>
+    </batch:job>
+    <flow name="errorReceiver">
+        <vm:inbound-endpoint exchange-pattern="one-way" path="errorReceive" doc:name="vmErrorReceive"/>
+        <object-to-string-transformer doc:name="Object to String"/>
+        <file:outbound-endpoint path="${file.path.out}" connector-ref="LogErrors" responseTimeout="10000" doc:name="logErrors"/>
+    </flow>
+</mule>
