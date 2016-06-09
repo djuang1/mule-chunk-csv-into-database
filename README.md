@@ -1,0 +1,2 @@
+# Mule Example - Load large CSV file into a database
+This example Mule project shows how to stream a large CSV file into a database by spliting the file into smaller chunks and streaming those chunks into a database. A custom Messge Processor is used to split the CSV file by a predefined number of rows. Those chunks are then sent to a VM Queue and distributed to a batch flow to a Batch Commit which uses the Database Connector to bulk load and insert the records into a MySQL database. 
