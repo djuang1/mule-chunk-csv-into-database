@@ -18,6 +18,7 @@ This example Mule project shows how to stream a large CSV file into a database b
 2. Modify the 'mule-app.properties' file with your database credentials and folders the application will use to find the CSV file and where to drop the file after processing.
 3. In the application, set the number of rows to split the file by in the 'Set Line Group Size' component.
 4. Run the project.
+5. Drop the example CSV file into the folder where the application is pointed to.
 
 ## Resources
 * SQL Script - https://github.com/djuang1/mule-chunk-csv-into-database/blob/master/src/main/resources/csvmap1.sql
