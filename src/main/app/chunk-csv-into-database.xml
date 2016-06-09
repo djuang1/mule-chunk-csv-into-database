@@ -15,7 +15,7 @@ http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/cor
     <flow name="largeTextFileFlow" initialState="started">
         <file:inbound-endpoint path="${file.path.in}" moveToDirectory="${file.path.out}" connector-ref="FileIn" responseTimeout="10000" doc:name="Read CSV File" pollingFrequency="10000"/>
         <set-variable variableName="lineGroupSize" value="500" doc:name="Set Line Group Size"/>
-        <custom-transformer class="com.mulesoft.services.file.FileRowGenerator" doc:name="FileRowGenerator"/>
+        <custom-transformer class="com.mulesoft.services.file.FileRowGenerator" doc:name="FileRowGenerator" doc:description="Returns predefined number of rows from file as a String object."/>
         <file:outbound-endpoint path="${file.path.out}" connector-ref="FileOut" responseTimeout="10000" doc:name="Move Processed File"/>
         <catch-exception-strategy doc:name="Catch Exception Strategy">
             <vm:outbound-endpoint exchange-pattern="one-way" path="errorReceive" connector-ref="ayncQueueConfig" doc:name="sendToErrorReceiver"/>
